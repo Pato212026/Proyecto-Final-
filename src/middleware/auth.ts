@@ -13,15 +13,20 @@ export interface AuthenticatedRequest extends Request {
   };
 }
 
-export const requireAuth = async (
-  req: AuthenticatedRequest,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    const staticUid = 'default-user-uid';
-    const staticEmail = 'lucida@example.com';
+let cachedUser: any = null;
+let initPromise: Promise<any> | null = null;
 
+async function getOrCreateStaticUser(): Promise<any> {
+  if (cachedUser) return cachedUser;
+
+  if (initPromise) {
+    return initPromise;
+  }
+
+  const staticUid = 'default-user-uid';
+  const staticEmail = 'lucida@example.com';
+
+  initPromise = (async () => {
     // Check if the user already exists in the Postgres DB
     let pgUser = await db.query.users.findFirst({
       where: eq(users.uid, staticUid),
@@ -55,18 +60,39 @@ export const requireAuth = async (
           });
         }
       } catch (insertError: any) {
-        console.warn('Concurrent user insertion handled in requireAuth:', insertError.message || insertError);
-        
-        // Re-find the user in case they were created in a concurrent transaction
+        // Fallback silently if some other mechanism inserted concurrently
         pgUser = await db.query.users.findFirst({
           where: eq(users.uid, staticUid),
         });
-
         if (!pgUser) {
           throw insertError;
         }
       }
     }
+
+    cachedUser = pgUser;
+    return pgUser;
+  })();
+
+  try {
+    const user = await initPromise;
+    return user;
+  } catch (err) {
+    initPromise = null; // Clear promise on failure to allow retry on next requests
+    throw err;
+  }
+}
+
+export const requireAuth = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const staticUid = 'default-user-uid';
+    const staticEmail = 'lucida@example.com';
+
+    const pgUser = await getOrCreateStaticUser();
 
     req.user = {
       uid: staticUid,
