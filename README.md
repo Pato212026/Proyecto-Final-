@@ -60,6 +60,7 @@ La estrategia de Prompt Engineering y el proceso iterativo de corrección de err
 documentados en `/docs/Prompts IA.pdf`.
 ---
 Prototipo (Stitch): https://stitch.withgoogle.com/projects/12412484818455014671
+
 Video pitch (demostración): [pegar aquí el enlace de YouTube o Drive una vez grabado]
 ---
 Grupo 4 — Caso "Freelance en Apuros":
