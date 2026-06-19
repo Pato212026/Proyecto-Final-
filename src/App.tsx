@@ -3,9 +3,10 @@ import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { auth } from './lib/firebase.ts';
 import { AuthScreen } from './components/AuthScreen.tsx';
 import { ClientTimer } from './components/ClientTimer.tsx';
+import { ExcelImporter, ColumnMapping } from './components/ExcelImporter.tsx';
 import { Client, Project, Service, TimeSession, Invoice } from './types.ts';
 import { 
-  Users, Briefcase, Receipt, Timer, Home, LogOut, Plus, Edit2, Trash2, Calendar, FileText, CheckCircle, AlertTriangle, AlertCircle, RefreshCw, BarChart2
+  Users, Briefcase, Receipt, Timer, Home, LogOut, Plus, Edit2, Trash2, Calendar, FileText, CheckCircle, AlertTriangle, AlertCircle, RefreshCw, BarChart2, FileSpreadsheet
 } from 'lucide-react';
 
 export default function App() {
@@ -28,6 +29,7 @@ export default function App() {
 
   // Modal / Form state
   const [showClientModal, setShowClientModal] = useState(false);
+  const [showImportClientModal, setShowImportClientModal] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [clientForm, setClientForm] = useState({ nombre: '', contacto: '', tipo: 'Fijo' });
 
@@ -122,12 +124,35 @@ export default function App() {
 
   // Seeding initial template data so Lucía doesn't start with a blank screen on her first workspace load.
   const handleLoadDemoData = async () => {
-    if (!apiToken) return;
+    if (!confirm('¿Deseas cargar los datos de demostración? Esto restablecerá tus datos actuales (clientes, proyectos, facturas, bitácora) para evitar duplicados y dejar un estado demo limpio.')) return;
+    
+    let activeToken = apiToken;
+    if (!activeToken && auth.currentUser) {
+      try {
+        activeToken = await auth.currentUser.getIdToken(true);
+        setApiToken(activeToken);
+      } catch (e) {
+        console.error("Error securing active token:", e);
+      }
+    }
+
+    if (!activeToken) {
+      alert('No se pudo verificar tu sesión. Por favor, inicia sesión nuevamente.');
+      return;
+    }
+
+    setLoadingData(true);
     try {
       const headers = { 
-        'Authorization': `Bearer ${apiToken}`, 
+        'Authorization': `Bearer ${activeToken}`, 
         'Content-Type': 'application/json' 
       };
+
+      // 0. Reset prev demo/user data
+      await fetch('/api/demo/reset', {
+        method: 'POST',
+        headers
+      });
 
       // 1. Create 3 Clientes
       const c1 = await fetch('/api/clientes', {
@@ -226,11 +251,13 @@ export default function App() {
       });
 
       // Refresh
-      await fetchAllData(apiToken);
+      await fetchAllData(activeToken);
       alert('¡Datos de demostración cargados exitosamente!');
     } catch (error) {
       console.error(error);
       alert('Error inicializando datos.');
+    } finally {
+      setLoadingData(false);
     }
   };
 
@@ -275,6 +302,83 @@ export default function App() {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const clientColumnConfig: ColumnMapping[] = [
+    {
+      key: 'nombre',
+      label: 'Nombre de Cliente',
+      synonyms: ['nombre', 'name', 'cliente', 'customer', 'empresa', 'razon social'],
+      required: true,
+      validate: (val) => {
+        if (!val || val.toString().trim().length === 0) return 'El nombre de cliente es obligatorio';
+        return null;
+      }
+    },
+    {
+      key: 'contacto',
+      label: 'Información de Contacto',
+      synonyms: ['contacto', 'contact', 'email', 'correo', 'fono', 'telefono', 'teléfono', 'phone'],
+      required: true,
+      validate: (val) => {
+        if (!val || val.toString().trim().length === 0) return 'La información de contacto es obligatoria';
+        return null;
+      }
+    },
+    {
+      key: 'tipo',
+      label: 'Tipo de Cliente',
+      synonyms: ['tipo', 'type', 'tipo de cliente', 'client type'],
+      required: false,
+      defaultValue: 'Fijo',
+      normalize: (val) => {
+        const v = val.toString().toLowerCase().trim();
+        if (v.includes('fijo') || v.includes('fixed')) return 'Fijo';
+        if (v.includes('espor') || v.includes('tem') || v.includes('one') || v.includes('esp')) return 'Esporádico';
+        return 'Fijo'; // Default fallback
+      },
+      validate: (val) => {
+        const normalized = val.toString();
+        if (normalized !== 'Fijo' && normalized !== 'Esporádico') {
+          return "El tipo de cliente debe ser o bien 'Fijo' o 'Esporádico'.";
+        }
+        return null;
+      }
+    }
+  ];
+
+  const handleImportClients = async (validClients: any[]) => {
+    if (!apiToken) return;
+    const headers = { 
+      'Authorization': `Bearer ${apiToken}`, 
+      'Content-Type': 'application/json' 
+    };
+
+    let importedCount = 0;
+    for (const cli of validClients) {
+      try {
+        const res = await fetch('/api/clientes', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            nombre: cli.nombre,
+            contacto: cli.contacto,
+            tipo: cli.tipo || 'Fijo'
+          })
+        });
+        if (res.ok) {
+          importedCount++;
+        } else {
+          console.error('Error importing client row:', await res.text());
+        }
+      } catch (err) {
+        console.error('Network error during client import:', err);
+      }
+    }
+
+    // Refresh client list
+    await fetchAllData(apiToken);
+    alert(`Se han importado exitosamente ${importedCount} de ${validClients.length} clientes.`);
   };
 
   const handleEditClient = (cli: Client) => {
@@ -715,17 +819,24 @@ export default function App() {
           </button>
         </div>
 
-        {/* Seed helper for empty initial account */}
-        {clientes.length === 0 && !loadingData && (
-          <div className="bg-indigo-50/60 border border-indigo-100 rounded-2xl p-6 flex flex-col sm:flex-row items-center justify-between gap-5 shadow-xs">
+        {/* Seed helper for demo account (Always available) */}
+        {!loadingData && (
+          <div className="bg-indigo-50/60 border border-indigo-100 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-5 shadow-xs">
             <div>
-              <h4 className="font-extrabold text-indigo-900 text-base">¡Te damos la bienvenida a Lúcida!</h4>
-              <p className="text-xs text-indigo-700/80 mt-1 leading-relaxed">Para ver en acción el control de rentabilidad, EHR y bitácora con cronómetros, te sugerimos inicializar datos de demostración realistas.</p>
+              <h4 className="font-extrabold text-indigo-900 text-sm">
+                {clientes.length === 0 ? '¡Te damos la bienvenida a Lúcida!' : '¿Quieres restablecer la demostración?'}
+              </h4>
+              <p className="text-xs text-indigo-700/80 mt-1 leading-relaxed">
+                {clientes.length === 0 
+                  ? 'Para ver en acción el control de rentabilidad de Lúcida, EHR y bitácora con cronómetros, inicializa los datos de demostración.'
+                  : 'Puedes volver a cargar los datos de demostración limpios en cualquier momento para reiniciar tu entorno de prueba de forma consistente.'}
+              </p>
             </div>
             <button
               onClick={handleLoadDemoData}
-              className="whitespace-nowrap bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-5 rounded-lg text-xs tracking-wide transition-colors shadow-sm cursor-pointer"
+              className="whitespace-nowrap bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg text-xs tracking-wide transition-colors shadow-sm cursor-pointer flex items-center gap-1.5"
             >
+              <RefreshCw className="w-3.5 h-3.5" />
               Cargar datos demo
             </button>
           </div>
@@ -1013,18 +1124,28 @@ export default function App() {
                 </h2>
                 <p className="text-slate-400 text-xs mt-1">Lleva control de datos de contacto de clientes recurrentes o esporádicos.</p>
               </div>
-              <button
-                onClick={() => {
-                  setEditingClient(null);
-                  setClientForm({ nombre: '', contacto: '', tipo: 'Fijo' });
-                  setShowClientModal(true);
-                }}
-                className="bg-slate-900 hover:bg-slate-800 text-white py-2 px-4 rounded-lg flex items-center gap-1.5 text-xs font-bold shadow-xs transition-colors cursor-pointer"
-                title="Nuevo Cliente"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Agregar Cliente</span>
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowImportClientModal(true)}
+                  className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 py-2 px-4 rounded-lg flex items-center gap-1.5 text-xs font-bold shadow-xs transition-all cursor-pointer"
+                  title="Importar Clientes"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  <span>Importar desde Excel</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setEditingClient(null);
+                    setClientForm({ nombre: '', contacto: '', tipo: 'Fijo' });
+                    setShowClientModal(true);
+                  }}
+                  className="bg-slate-900 hover:bg-slate-800 text-white py-2 px-4 rounded-lg flex items-center gap-1.5 text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                  title="Nuevo Cliente"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Agregar Cliente</span>
+                </button>
+              </div>
             </div>
 
             {/* List */}
@@ -1415,6 +1536,18 @@ export default function App() {
           </div>
         </div>
       )}
+
+
+      {/* ---------------- CLIENT IMPORT MODAL ---------------- */}
+      <ExcelImporter
+        isOpen={showImportClientModal}
+        onClose={() => setShowImportClientModal(false)}
+        title="Importar Clientes desde Excel"
+        subtitle="Sube tu planilla de clientes (.xlsx o .csv) para cargarlos de una vez en Lúcida"
+        columnConfig={clientColumnConfig}
+        onImport={handleImportClients}
+        sampleColumnsMessage="Tu planilla debe contener columnas correspondientes a: Nombre de Cliente, Información de Contacto y Tipo de Cliente (Fijo o Esporádico)."
+      />
 
 
       {/* ---------------- CLIENT CREATION/EDITION MODAL ---------------- */}

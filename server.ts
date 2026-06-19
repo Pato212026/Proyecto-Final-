@@ -443,6 +443,26 @@ async function startServer() {
     }
   });
 
+  // Demo Reset endpoint to prevent duplicates and clean old demo data before inserting
+  app.post('/api/demo/reset', requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.dbUser!.id;
+      // 1. Delete associated sessions
+      await db.delete(sesionesTiempo).where(eq(sesionesTiempo.userId, userId));
+      // 2. Delete associated invoices
+      await db.delete(facturas).where(eq(facturas.userId, userId));
+      // 3. Delete associated projects
+      await db.delete(proyectos).where(eq(proyectos.userId, userId));
+      // 4. Delete associated clients
+      await db.delete(clientes).where(eq(clientes.userId, userId));
+
+      res.json({ message: 'Todos los datos previos fueron eliminados con éxito.' });
+    } catch (error: any) {
+      console.error('Error resetting user demo data:', error);
+      res.status(500).json({ error: 'Fallo al reiniciar los datos de demostración.' });
+    }
+  });
+
   // --- MIDDLEWARE FOR DEV OR ASSET SERVING ---
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
