@@ -9,7 +9,7 @@ export interface ColumnMapping {
   label: string;            // Visual name (e.g., 'Nombre del Cliente')
   synonyms: string[];       // Synonyms for mapping header columns (e.g., ['nombre', 'name', 'cliente', 'customer'])
   required: boolean;        // If the field is mandatory
-  validate?: (val: any) => string | null;  // Custom validation rule, returns error message or null if valid
+  validate?: (val: any, rowContext?: any) => string | null;  // Custom validation rule, returns error message or null if valid
   normalize?: (val: any) => any;           // Normalize data (e.g., 'fijo' -> 'Fijo')
   defaultValue?: any;
 }
@@ -129,6 +129,7 @@ export function ExcelImporter({
           const item: Record<string, any> = {};
           const rowErrors: string[] = [];
 
+          // First pass: resolve and normalize values
           columnConfig.forEach(col => {
             const fileHeader = mappings[col.key];
             let rawValue = undefined;
@@ -153,16 +154,20 @@ export function ExcelImporter({
               if (col.normalize) {
                 value = col.normalize(value);
               }
-              
-              // Validate structure
-              if (col.validate) {
-                const validationError = col.validate(value);
-                if (validationError) {
-                  rowErrors.push(validationError);
-                }
-              }
-              
               item[col.key] = value;
+            }
+          });
+
+          // Second pass: run validations with full item context
+          columnConfig.forEach(col => {
+            const value = item[col.key];
+            const hasMissingError = rowErrors.some(e => e.includes(`Falta el campo obligatorio "${col.label}"`));
+            
+            if (!hasMissingError && col.validate) {
+              const validationError = col.validate(value, item);
+              if (validationError) {
+                rowErrors.push(validationError);
+              }
             }
           });
 

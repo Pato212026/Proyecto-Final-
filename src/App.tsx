@@ -39,6 +39,7 @@ export default function App() {
   const [projectForm, setProjectForm] = useState({ nombre: '', clienteId: '', servicioId: '', modeloCobro: 'Por hora', tarifa: '25000', estado: 'Activo' });
 
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [showImportInvoiceModal, setShowImportInvoiceModal] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [invoiceForm, setInvoiceForm] = useState({ clienteId: '', proyectoId: '', monto: '200000', fechaEmision: '', fechaOrigenDeuda: '', estado: 'pendiente' });
 
@@ -557,6 +558,202 @@ export default function App() {
     // Refresh data
     await fetchAllData(apiToken);
     alert(`Se han importado exitosamente ${importedCount} de ${validProjects.length} proyectos.`);
+  };
+
+  const parseImportDate = (val: any): string => {
+    if (!val) return '';
+    const str = val.toString().trim();
+    // Check if it's already YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      return str;
+    }
+    // Check for DD/MM/YYYY or DD-MM-YYYY
+    const dmyMatch = str.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+    if (dmyMatch) {
+      const day = dmyMatch[1].padStart(2, '0');
+      const month = dmyMatch[2].padStart(2, '0');
+      const year = dmyMatch[3];
+      return `${year}-${month}-${day}`;
+    }
+    // Check if it's a number (Excel date code)
+    const num = Number(str);
+    if (!isNaN(num) && num > 30000 && num < 60000) {
+      const date = new Date((num - 25569) * 86400 * 1000);
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(date.getUTCDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    // Try native JS Date parsing
+    try {
+      const d = new Date(str);
+      if (!isNaN(d.getTime())) {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+    } catch (e) {}
+    return str; // Fallback as-is
+  };
+
+  const invoiceColumnConfig: ColumnMapping[] = [
+    {
+      key: 'clienteNombre',
+      label: 'Cliente',
+      synonyms: ['clienteNombre', 'cliente', 'client', 'customer', 'empresa', 'razon social', 'razón social'],
+      required: true,
+      validate: (val) => {
+        const trimmedVal = val?.toString().trim();
+        if (!trimmedVal) return 'El cliente es obligatorio';
+        const found = clientes.some(c => c.nombre.trim().toLowerCase() === trimmedVal.toLowerCase());
+        if (!found) return `El cliente "${trimmedVal}" no existe en la base de datos`;
+        return null;
+      }
+    },
+    {
+      key: 'proyectoNombre',
+      label: 'Proyecto',
+      synonyms: ['proyectoNombre', 'proyecto', 'project', 'nombre del proyecto'],
+      required: false,
+      validate: (val, rowContext) => {
+        const trimmedVal = val?.toString().trim();
+        if (!trimmedVal) return null; // Opcional
+        const clientVal = rowContext?.['clienteNombre']?.toString().trim();
+        if (!clientVal) return null; // El validador del cliente se encargará
+
+        const foundClient = clientes.find(c => c.nombre.trim().toLowerCase() === clientVal.toLowerCase());
+        if (foundClient) {
+          const foundProject = proyectos.find(p => 
+            p.clienteId === foundClient.id && 
+            p.nombre.trim().toLowerCase() === trimmedVal.toLowerCase()
+          );
+          if (!foundProject) {
+            return `El proyecto "${trimmedVal}" no existe para el cliente "${clientVal}"`;
+          }
+        }
+        return null;
+      }
+    },
+    {
+      key: 'monto',
+      label: 'Monto',
+      synonyms: ['monto', 'amount', 'total', 'valor', 'pesos', 'cobro', 'precio'],
+      required: true,
+      normalize: (val) => {
+        const clean = val.toString().replace(/[^0-9]/g, '');
+        const parsed = parseInt(clean);
+        return isNaN(parsed) ? 0 : parsed;
+      },
+      validate: (val) => {
+        const num = Number(val);
+        if (isNaN(num) || num < 0) return 'El monto debe ser un número entero mayor o igual a 0';
+        return null;
+      }
+    },
+    {
+      key: 'fechaEmision',
+      label: 'Fecha Emisión',
+      synonyms: ['fecha emision', 'fecha de emision', 'fecha emisión', 'fecha de emisión', 'emision', 'emisión', 'date', 'issue date'],
+      required: true,
+      normalize: (val) => parseImportDate(val),
+      validate: (val) => {
+        if (!val || !/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+          return 'La fecha de emisión debe tener un formato válido (YYYY-MM-DD)';
+        }
+        return null;
+      }
+    },
+    {
+      key: 'fechaOrigenDeuda',
+      label: 'Origen de Deuda',
+      synonyms: ['origen de deuda', 'origen deuda', 'fecha origen', 'fecha origen deuda', 'deuda desde', 'desde', 'debt date', 'source date'],
+      required: false,
+      normalize: (val) => {
+        if (!val || val.toString().trim() === '') return '';
+        return parseImportDate(val);
+      },
+      validate: (val) => {
+        if (val && val.toString().trim() !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+          return 'La fecha de origen de la deuda debe tener un formato válido (YYYY-MM-DD)';
+        }
+        return null;
+      }
+    },
+    {
+      key: 'estado',
+      label: 'Estado',
+      synonyms: ['estado', 'status', 'estado de pago', 'pago'],
+      required: true,
+      normalize: (val) => {
+        const v = val.toString().toLowerCase().trim();
+        if (v.includes('pag') || v.includes('paid')) return 'pagada';
+        if (v.includes('pend') || v.includes('due') || v.includes('unpaid')) return 'pendiente';
+        if (v.includes('venc') || v.includes('over') || v.includes('exp')) return 'vencida';
+        return 'pendiente';
+      },
+      validate: (val) => {
+        if (val !== 'pagada' && val !== 'pendiente' && val !== 'vencida') {
+          return "El estado debe ser uno de: 'Pagada', 'Pendiente' o 'Vencida'";
+        }
+        return null;
+      }
+    }
+  ];
+
+  const handleImportInvoices = async (validInvoices: any[]) => {
+    if (!apiToken) return;
+    const headers = { 
+      'Authorization': `Bearer ${apiToken}`, 
+      'Content-Type': 'application/json' 
+    };
+
+    let importedCount = 0;
+    for (const inv of validInvoices) {
+      try {
+        const foundClient = clientes.find(c => c.nombre.trim().toLowerCase() === inv.clienteNombre.trim().toLowerCase());
+        if (!foundClient) continue;
+
+        let projId = null;
+        if (inv.proyectoNombre) {
+          const foundProject = proyectos.find(p => 
+            p.clienteId === foundClient.id && 
+            p.nombre.trim().toLowerCase() === inv.proyectoNombre.trim().toLowerCase()
+          );
+          if (foundProject) {
+            projId = foundProject.id;
+          }
+        }
+
+        const fEmision = inv.fechaEmision;
+        const fOrigen = (inv.fechaOrigenDeuda && inv.fechaOrigenDeuda.trim() !== '') ? inv.fechaOrigenDeuda : fEmision;
+
+        const res = await fetch('/api/facturas', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            clienteId: foundClient.id.toString(),
+            proyectoId: projId ? projId.toString() : null,
+            monto: (inv.monto || 0).toString(),
+            fechaEmision: fEmision,
+            fechaOrigenDeuda: fOrigen,
+            estado: inv.estado || 'pendiente'
+          })
+        });
+
+        if (res.ok) {
+          importedCount++;
+        } else {
+          console.error('Error importing invoice row:', await res.text());
+        }
+      } catch (err) {
+        console.error('Network error during invoice import:', err);
+      }
+    }
+
+    // Refresh data
+    await fetchAllData(apiToken);
+    alert(`Se han importado exitosamente ${importedCount} de ${validInvoices.length} facturas.`);
   };
 
   const handleEditClient = (cli: Client) => {
@@ -1393,25 +1590,35 @@ export default function App() {
                 </h2>
                 <p className="text-slate-400 text-xs mt-1">Suma ingresos y vigila el estado de pago de cada entrega.</p>
               </div>
-              <button
-                onClick={() => {
-                  setEditingInvoice(null);
-                  setInvoiceForm({
-                    clienteId: clientes[0]?.id.toString() || '',
-                    proyectoId: proyectos[0]?.id.toString() || '',
-                    monto: '200000',
-                    fechaEmision: new Date().toISOString().split('T')[0],
-                    fechaOrigenDeuda: new Date().toISOString().split('T')[0],
-                    estado: 'pendiente'
-                  });
-                  setShowInvoiceModal(true);
-                }}
-                className="bg-slate-900 hover:bg-slate-800 text-white py-2 px-4 rounded-lg flex items-center gap-1.5 text-xs font-bold shadow-xs transition-colors cursor-pointer"
-                title="Emitir Factura"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Emitir Factura</span>
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowImportInvoiceModal(true)}
+                  className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 py-2 px-4 rounded-lg flex items-center gap-1.5 text-xs font-bold shadow-xs transition-all cursor-pointer"
+                  title="Importar Facturas desde Excel"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  <span>Importar desde Excel</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setEditingInvoice(null);
+                    setInvoiceForm({
+                      clienteId: clientes[0]?.id.toString() || '',
+                      proyectoId: proyectos[0]?.id.toString() || '',
+                      monto: '200000',
+                      fechaEmision: new Date().toISOString().split('T')[0],
+                      fechaOrigenDeuda: new Date().toISOString().split('T')[0],
+                      estado: 'pendiente'
+                    });
+                    setShowInvoiceModal(true);
+                  }}
+                  className="bg-slate-900 hover:bg-slate-800 text-white py-2 px-4 rounded-lg flex items-center gap-1.5 text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                  title="Emitir Factura"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Emitir Factura</span>
+                </button>
+              </div>
             </div>
 
             {/* Invoices overall stats mini grid */}
@@ -1746,6 +1953,17 @@ export default function App() {
         columnConfig={projectColumnConfig}
         onImport={handleImportProjects}
         sampleColumnsMessage="Tu planilla debe contener columnas correspondientes a: Nombre del Proyecto, Cliente (que ya debe existir), Servicio, Modelo de Cobro (Por hora, Precio fijo, Suscripción), Tarifa (monto numérico) y Estado (Activo, Completado, Pausado, etc.)."
+      />
+
+      {/* ---------------- INVOICE IMPORT MODAL ---------------- */}
+      <ExcelImporter
+        isOpen={showImportInvoiceModal}
+        onClose={() => setShowImportInvoiceModal(false)}
+        title="Importar Facturas desde Excel"
+        subtitle="Sube tu planilla de facturas (.xlsx o .csv) para cargarlas de una vez en Lúcida"
+        columnConfig={invoiceColumnConfig}
+        onImport={handleImportInvoices}
+        sampleColumnsMessage="Tu planilla debe contener columnas correspondientes a: Cliente (debe existir), Proyecto (opcional, debe ser del cliente), Monto (valor numérico), Fecha Emisión (YYYY-MM-DD), Origen de Deuda (opcional, YYYY-MM-DD) y Estado (Pagada, Pendiente o Vencida)."
       />
 
 
