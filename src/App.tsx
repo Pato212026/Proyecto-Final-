@@ -30,6 +30,7 @@ export default function App() {
   // Modal / Form state
   const [showClientModal, setShowClientModal] = useState(false);
   const [showImportClientModal, setShowImportClientModal] = useState(false);
+  const [showImportProjectModal, setShowImportProjectModal] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [clientForm, setClientForm] = useState({ nombre: '', contacto: '', tipo: 'Fijo' });
 
@@ -379,6 +380,183 @@ export default function App() {
     // Refresh client list
     await fetchAllData(apiToken);
     alert(`Se han importado exitosamente ${importedCount} de ${validClients.length} clientes.`);
+  };
+
+  const projectColumnConfig: ColumnMapping[] = [
+    {
+      key: 'nombre',
+      label: 'Nombre del Proyecto',
+      synonyms: ['nombre del proyecto', 'nombre proyecto', 'nombre', 'proyecto', 'project name', 'project'],
+      required: true,
+      validate: (val) => {
+        if (!val || val.toString().trim().length === 0) return 'El nombre del proyecto es obligatorio';
+        return null;
+      }
+    },
+    {
+      key: 'clienteNombre',
+      label: 'Cliente',
+      synonyms: ['clienteNombre', 'cliente', 'client', 'customer', 'empresa'],
+      required: true,
+      validate: (val) => {
+        const trimmedVal = val?.toString().trim();
+        if (!trimmedVal) return 'El cliente es obligatorio';
+        const found = clientes.some(c => c.nombre.trim().toLowerCase() === trimmedVal.toLowerCase());
+        if (!found) return `El cliente "${trimmedVal}" no existe en la base de datos`;
+        return null;
+      }
+    },
+    {
+      key: 'servicio',
+      label: 'Servicio',
+      synonyms: ['servicio', 'service', 'catálogo', 'catalogo', 'tipo de servicio'],
+      required: false,
+      defaultValue: 'Diseño UI',
+      normalize: (val) => val.toString().trim(),
+      validate: (val) => {
+        if (!val || val.toString().trim().length === 0) return 'El servicio no puede estar totalmente vacío';
+        return null;
+      }
+    },
+    {
+      key: 'modeloCobro',
+      label: 'Modelo de Cobro',
+      synonyms: ['modelo de cobro', 'modelo', 'cobro', 'billing model', 'charge model'],
+      required: true,
+      normalize: (val) => {
+        const v = val.toString().toLowerCase().trim();
+        if (v.includes('hora') || v.includes('hour')) return 'Por hora';
+        if (v.includes('fijo') || v.includes('fixed') || v.includes('precio')) return 'Precio fijo';
+        if (v.includes('suscrip') || v.includes('subs') || v.includes('abono') || v.includes('mensual')) return 'Suscripción';
+        return 'Precio fijo'; // Default fallback
+      },
+      validate: (val) => {
+        const normalized = val.toString();
+        if (normalized !== 'Por hora' && normalized !== 'Precio fijo' && normalized !== 'Suscripción') {
+          return "El modelo de cobro debe ser uno de: 'Por hora', 'Precio fijo' o 'Suscripción'";
+        }
+        return null;
+      }
+    },
+    {
+      key: 'tarifa',
+      label: 'Tarifa',
+      synonyms: ['tarifa', 'rate', 'costo', 'precio', 'monto', 'fee', 'charge'],
+      required: false,
+      defaultValue: 0,
+      normalize: (val) => {
+        const clean = val.toString().replace(/[^0-9]/g, '');
+        const parsed = parseInt(clean);
+        return isNaN(parsed) ? 0 : parsed;
+      },
+      validate: (val) => {
+        const num = Number(val);
+        if (isNaN(num) || num < 0) return 'La tarifa debe ser un número entero mayor o igual a 0';
+        return null;
+      }
+    },
+    {
+      key: 'estado',
+      label: 'Estado',
+      synonyms: ['estado', 'status', 'fase', 'etapa', 'stage'],
+      required: false,
+      defaultValue: 'Activo',
+      normalize: (val) => {
+        const s = val.toString().trim();
+        if (!s) return 'Activo';
+        return s.slice(0, 1).toUpperCase() + s.slice(1);
+      }
+    }
+  ];
+
+  const handleImportProjects = async (validProjects: any[]) => {
+    if (!apiToken) return;
+    const headers = { 
+      'Authorization': `Bearer ${apiToken}`, 
+      'Content-Type': 'application/json' 
+    };
+
+    let importedCount = 0;
+    for (const proj of validProjects) {
+      try {
+        const foundClient = clientes.find(c => c.nombre.trim().toLowerCase() === proj.clienteNombre.trim().toLowerCase());
+        if (!foundClient) {
+          console.error(`Client ${proj.clienteNombre} not found, skipping.`);
+          continue;
+        }
+
+        let sId = 0;
+        const servName = (proj.servicio || '').trim();
+        
+        // Find existing service or create on the fly
+        const matchedService = servicios.find(s => s.nombre.toLowerCase().trim() === servName.toLowerCase());
+        if (matchedService) {
+          sId = matchedService.id;
+        } else if (servName) {
+          try {
+            const sRes = await fetch('/api/servicios', {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ nombre: servName })
+            });
+            if (sRes.ok) {
+              const newSrv = await sRes.json();
+              servicios.push(newSrv);
+              sId = newSrv.id;
+            }
+          } catch (err) {
+            console.error("Error creating service on-the-fly:", err);
+          }
+        }
+
+        // Default fallback if we still don't have a valid service id
+        if (sId === 0) {
+          if (servicios.length > 0) {
+            sId = servicios[0].id;
+          } else {
+            try {
+              const sRes = await fetch('/api/servicios', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ nombre: 'Diseño UI' })
+              });
+              if (sRes.ok) {
+                const newSrv = await sRes.json();
+                servicios.push(newSrv);
+                sId = newSrv.id;
+              }
+            } catch (err) {
+              console.error("Error seeding emergency fallback service:", err);
+            }
+          }
+        }
+
+        const res = await fetch('/api/proyectos', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            nombre: proj.nombre,
+            clienteId: foundClient.id.toString(),
+            servicioId: sId.toString(),
+            modeloCobro: proj.modeloCobro,
+            tarifa: (proj.tarifa || 0).toString(),
+            estado: proj.estado || 'Activo'
+          })
+        });
+
+        if (res.ok) {
+          importedCount++;
+        } else {
+          console.error('Error importing project row:', await res.text());
+        }
+      } catch (err) {
+        console.error('Network error during project import:', err);
+      }
+    }
+
+    // Refresh data
+    await fetchAllData(apiToken);
+    alert(`Se han importado exitosamente ${importedCount} de ${validProjects.length} proyectos.`);
   };
 
   const handleEditClient = (cli: Client) => {
@@ -995,25 +1173,35 @@ export default function App() {
                 </h2>
                 <p className="text-slate-400 text-xs mt-1">Vincula clientes fijos con modelos de cobro y presupuestos (CLP).</p>
               </div>
-              <button
-                onClick={() => {
-                  setEditingProject(null);
-                  setProjectForm({
-                    nombre: '',
-                    clienteId: clientes[0]?.id.toString() || '',
-                    servicioId: servicios[0]?.id.toString() || '',
-                    modeloCobro: 'Por hora',
-                    tarifa: '25000',
-                    estado: 'Activo'
-                  });
-                  setShowProjectModal(true);
-                }}
-                className="bg-slate-900 hover:bg-slate-800 text-white py-2 px-4 rounded-lg flex items-center gap-1.5 text-xs font-bold shadow-xs transition-colors cursor-pointer"
-                title="Nuevo Proyecto"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Crear Proyecto</span>
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowImportProjectModal(true)}
+                  className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 py-2 px-4 rounded-lg flex items-center gap-1.5 text-xs font-bold shadow-xs transition-all cursor-pointer"
+                  title="Importar Proyectos"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  <span>Importar desde Excel</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setEditingProject(null);
+                    setProjectForm({
+                      nombre: '',
+                      clienteId: clientes[0]?.id.toString() || '',
+                      servicioId: servicios[0]?.id.toString() || '',
+                      modeloCobro: 'Por hora',
+                      tarifa: '25000',
+                      estado: 'Activo'
+                    });
+                    setShowProjectModal(true);
+                  }}
+                  className="bg-slate-900 hover:bg-slate-800 text-white py-2 px-4 rounded-lg flex items-center gap-1.5 text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                  title="Nuevo Proyecto"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Crear Proyecto</span>
+                </button>
+              </div>
             </div>
 
             {/* Catalog Helper block */}
@@ -1547,6 +1735,17 @@ export default function App() {
         columnConfig={clientColumnConfig}
         onImport={handleImportClients}
         sampleColumnsMessage="Tu planilla debe contener columnas correspondientes a: Nombre de Cliente, Información de Contacto y Tipo de Cliente (Fijo o Esporádico)."
+      />
+
+      {/* ---------------- PROJECT IMPORT MODAL ---------------- */}
+      <ExcelImporter
+        isOpen={showImportProjectModal}
+        onClose={() => setShowImportProjectModal(false)}
+        title="Importar Proyectos desde Excel"
+        subtitle="Sube tu planilla de proyectos (.xlsx o .csv) para cargarlos de una vez en Lúcida"
+        columnConfig={projectColumnConfig}
+        onImport={handleImportProjects}
+        sampleColumnsMessage="Tu planilla debe contener columnas correspondientes a: Nombre del Proyecto, Cliente (que ya debe existir), Servicio, Modelo de Cobro (Por hora, Precio fijo, Suscripción), Tarifa (monto numérico) y Estado (Activo, Completado, Pausado, etc.)."
       />
 
 
