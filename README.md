@@ -71,7 +71,9 @@ despliegue en Render.
 La estrategia de Prompt Engineering y el proceso iterativo de corrección de errores están
 documentados en `/docs/Prompts IA.pdf`.
 ---
-Prototipo (Stitch): https://stitch.withgoogle.com/projects/12412484818455014671 Video pitch (demostración): https://drive.google.com/file/d/1Y1DM8DfTs-yDNP00NtqnwzPYIJRQUSTw/view?usp=sharing
+Prototipo (Stitch): https://stitch.withgoogle.com/projects/12412484818455014671 
+
+Video pitch (demostración): https://drive.google.com/file/d/1Y1DM8DfTs-yDNP00NtqnwzPYIJRQUSTw/view?usp=sharing
 ---
 Autores:
 Patricio Alarcón Salas/
