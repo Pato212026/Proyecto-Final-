@@ -7,8 +7,14 @@ import { clientes, servicios, proyectos, sesionesTiempo, facturas } from './src/
 import { eq, desc, and, inArray } from 'drizzle-orm';
 import { requireAuth, AuthenticatedRequest } from './src/middleware/auth.ts';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Path resolution safe for both ESM and CJS formats
+const _filename = typeof import.meta !== 'undefined' && import.meta.url
+  ? fileURLToPath(import.meta.url)
+  : (typeof __filename !== 'undefined' ? __filename : '');
+
+const _dirname = typeof import.meta !== 'undefined' && import.meta.url
+  ? path.dirname(_filename)
+  : (typeof __dirname !== 'undefined' ? __dirname : '');
 
 async function startServer() {
   const app = express();
