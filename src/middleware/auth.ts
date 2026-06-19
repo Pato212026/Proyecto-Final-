@@ -18,19 +18,13 @@ export const requireAuth = async (
   res: Response,
   next: NextFunction
 ) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized: Missing token' });
-  }
-
-  const token = authHeader.split('Bearer ')[1];
   try {
-    const decodedToken = await adminAuth.verifyIdToken(token);
-    req.user = decodedToken;
+    const staticUid = 'default-user-uid';
+    const staticEmail = 'lucida@example.com';
 
     // Check if the user already exists in the Postgres DB
     let pgUser = await db.query.users.findFirst({
-      where: eq(users.uid, decodedToken.uid),
+      where: eq(users.uid, staticUid),
     });
 
     if (!pgUser) {
@@ -38,8 +32,8 @@ export const requireAuth = async (
         // Create user
         const inserted = await db.insert(users)
           .values({
-            uid: decodedToken.uid,
-            email: decodedToken.email || 'unknown@example.com',
+            uid: staticUid,
+            email: staticEmail,
           })
           .returning();
         pgUser = inserted[0];
@@ -65,7 +59,7 @@ export const requireAuth = async (
         
         // Re-find the user in case they were created in a concurrent transaction
         pgUser = await db.query.users.findFirst({
-          where: eq(users.uid, decodedToken.uid),
+          where: eq(users.uid, staticUid),
         });
 
         if (!pgUser) {
@@ -73,6 +67,12 @@ export const requireAuth = async (
         }
       }
     }
+
+    req.user = {
+      uid: staticUid,
+      email: staticEmail,
+      name: 'Lucía'
+    };
 
     req.dbUser = {
       id: pgUser.id,
@@ -82,7 +82,7 @@ export const requireAuth = async (
 
     next();
   } catch (error: any) {
-    console.error('Error verifying Firebase ID token:', error);
-    return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+    console.error('Error during automatic authenticate fallback user bypass:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 };

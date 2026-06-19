@@ -10,9 +10,13 @@ import {
 } from 'lucide-react';
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [loadingAuth, setLoadingAuth] = useState(true);
-  const [apiToken, setApiToken] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>({
+    uid: 'default-user-uid',
+    email: 'lucida@example.com',
+    displayName: 'Lucía'
+  } as unknown as User);
+  const [loadingAuth, setLoadingAuth] = useState(false);
+  const [apiToken, setApiToken] = useState<string | null>('dummy-bypass-token');
 
   // Entities state
   const [clientes, setClientes] = useState<Client[]>([]);
@@ -70,40 +74,6 @@ export default function App() {
       fechaEmision: today,
       fechaOrigenDeuda: today
     }));
-  }, []);
-
-  // Listen to Auth State and Token Refreshes
-  useEffect(() => {
-    const unsubscribe = onIdTokenChanged(auth, async (user) => {
-      setCurrentUser(user);
-      if (user) {
-        try {
-          const token = await user.getIdToken();
-          setApiToken(token);
-        } catch (e) {
-          console.error("Error getting user ID Token", e);
-        }
-      } else {
-        setApiToken(null);
-      }
-      setLoadingAuth(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Periodic Token Auto-Refresh (Every 10 minutes to guarantee token never expires)
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      if (auth.currentUser) {
-        try {
-          const freshToken = await auth.currentUser.getIdToken(true);
-          setApiToken(freshToken);
-        } catch (err) {
-          console.error("Error during background token auto-refresh:", err);
-        }
-      }
-    }, 10 * 60 * 1000); // 10 minutes
-    return () => clearInterval(interval);
   }, []);
 
   // Fetch all data from API whenever token is ready
@@ -1323,13 +1293,6 @@ export default function App() {
             >
               <RefreshCw className="w-3.5 h-3.5" />
               <span>Empezar de cero</span>
-            </button>
-            <button 
-              onClick={() => signOut(auth)}
-              className="text-slate-400 hover:text-rose-600 p-1.5 rounded-full hover:bg-slate-50 transition-colors"
-              title="Cerrar sesión"
-            >
-              <LogOut className="w-5 h-5" />
             </button>
           </div>
         </div>
