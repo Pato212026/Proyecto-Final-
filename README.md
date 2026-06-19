@@ -59,14 +59,15 @@ la base de datos PostgreSQL, el backend y el frontend a partir de los diseños d
 La estrategia de Prompt Engineering y el proceso iterativo de corrección de errores están
 documentados en `/docs/Prompts IA.pdf`.
 ---
-Enlaces
 Prototipo (Stitch): https://stitch.withgoogle.com/projects/12412484818455014671
-
 Video pitch (demostración): [pegar aquí el enlace de YouTube o Drive una vez grabado]
 ---
 Grupo 4 — Caso "Freelance en Apuros":
 Patricio Alarcón Salas/
 Francisco Esquivel Rojas/
 Allén Saray Noemí Flores Ortiz/
-Camila Ignacia Soto Ceriche
+Camila Ignacia Soto Ceriche.
+
 Asignatura: Sistemas de Información — Ingeniería Comercial
+
+
