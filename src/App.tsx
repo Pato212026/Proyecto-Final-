@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { onAuthStateChanged, onIdTokenChanged, signOut, User } from 'firebase/auth';
 import { auth } from './lib/firebase.ts';
 import { AuthScreen } from './components/AuthScreen.tsx';
 import { ClientTimer } from './components/ClientTimer.tsx';
@@ -40,6 +40,7 @@ export default function App() {
 
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [showImportInvoiceModal, setShowImportInvoiceModal] = useState(false);
+  const [showImportSessionModal, setShowImportSessionModal] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [invoiceForm, setInvoiceForm] = useState({ clienteId: '', proyectoId: '', monto: '200000', fechaEmision: '', fechaOrigenDeuda: '', estado: 'pendiente' });
 
@@ -51,7 +52,7 @@ export default function App() {
   // Deletion confirm modal state
   const [deleteConfirm, setDeleteConfirm] = useState<{
     show: boolean;
-    type: 'client' | 'project' | 'invoice' | 'session' | null;
+    type: 'client' | 'project' | 'invoice' | 'session' | 'reset' | null;
     id: number | null;
     message: string;
   }>({
@@ -71,9 +72,9 @@ export default function App() {
     }));
   }, []);
 
-  // Listen to Auth State
+  // Listen to Auth State and Token Refreshes
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const unsubscribe = onIdTokenChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
         try {
@@ -88,6 +89,21 @@ export default function App() {
       setLoadingAuth(false);
     });
     return () => unsubscribe();
+  }, []);
+
+  // Periodic Token Auto-Refresh (Every 10 minutes to guarantee token never expires)
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (auth.currentUser) {
+        try {
+          const freshToken = await auth.currentUser.getIdToken(true);
+          setApiToken(freshToken);
+        } catch (err) {
+          console.error("Error during background token auto-refresh:", err);
+        }
+      }
+    }, 10 * 60 * 1000); // 10 minutes
+    return () => clearInterval(interval);
   }, []);
 
   // Fetch all data from API whenever token is ready
@@ -756,6 +772,130 @@ export default function App() {
     alert(`Se han importado exitosamente ${importedCount} de ${validInvoices.length} facturas.`);
   };
 
+  const sessionColumnConfig: ColumnMapping[] = [
+    {
+      key: 'proyectoNombre',
+      label: 'Proyecto',
+      synonyms: ['proyectoNombre', 'proyecto', 'project', 'nombre de proyecto', 'nombre del proyecto'],
+      required: true,
+      validate: (val) => {
+        const trimmedVal = val?.toString().trim();
+        if (!trimmedVal) return 'El proyecto es obligatorio';
+        const found = proyectos.some(p => p.nombre.trim().toLowerCase() === trimmedVal.toLowerCase());
+        if (!found) return `El proyecto "${trimmedVal}" no existe en la base de datos`;
+        return null;
+      }
+    },
+    {
+      key: 'duracionHoras',
+      label: 'Duración (Horas)',
+      synonyms: ['duración (horas)', 'duracion (horas)', 'duracion horas', 'duración horas', 'duración', 'duracion', 'hours', 'hour', 'tiempo', 'time', 'duration', 'horas'],
+      required: true,
+      normalize: (val) => {
+        const parsed = parseFloat(val.toString().trim().replace(',', '.'));
+        return isNaN(parsed) ? 0 : parsed;
+      },
+      validate: (val) => {
+        const num = Number(val);
+        if (isNaN(num) || num <= 0) return 'La duración debe ser un número mayor a 0 (ej. 1.5)';
+        return null;
+      }
+    },
+    {
+      key: 'facturable',
+      label: 'Facturable',
+      synonyms: ['facturable', 'billable', 'es facturable', 'es_facturable', 'cobrar'],
+      required: true,
+      normalize: (val) => {
+        const v = val.toString().toLowerCase().trim();
+        if (v === 'sí' || v === 'si' || v === 'yes' || v === 'y' || v === 's' || v === 'facturable' || v === 'true' || v === '1' || v === 'verdadero') {
+          return 'Sí';
+        }
+        return 'No';
+      },
+      validate: (val) => {
+        const normalized = val.toString();
+        if (normalized !== 'Sí' && normalized !== 'No') {
+          return "Debe indicar si es facturable ('Sí' o 'No')";
+        }
+        return null;
+      }
+    },
+    {
+      key: 'fecha',
+      label: 'Fecha',
+      synonyms: ['fecha', 'date', 'día', 'dia', 'fecha de la sesión', 'fecha de la sesion', 'fecha sesión', 'fecha sesion'],
+      required: true,
+      normalize: (val) => parseImportDate(val),
+      validate: (val) => {
+        if (!val || !/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+          return 'La fecha debe tener un formato válido (YYYY-MM-DD o similar)';
+        }
+        return null;
+      }
+    },
+    {
+      key: 'descripcion',
+      label: 'Descripción',
+      synonyms: ['descripción', 'descripcion', 'description', 'detalle', 'notas', 'nota', 'comentario', 'comentarios'],
+      required: false,
+      defaultValue: '',
+      normalize: (val) => val.toString().trim()
+    }
+  ];
+
+  const handleImportSessions = async (validSessions: any[]) => {
+    if (!apiToken) return;
+    const headers = { 
+      'Authorization': `Bearer ${apiToken}`, 
+      'Content-Type': 'application/json' 
+    };
+
+    let importedCount = 0;
+    for (const sess of validSessions) {
+      try {
+        const foundProject = proyectos.find(p => p.nombre.trim().toLowerCase() === sess.proyectoNombre.trim().toLowerCase());
+        if (!foundProject) continue;
+
+        const duracionSegundos = Math.round((sess.duracionHoras || 0) * 3600);
+        const facturableBool = sess.facturable === 'Sí';
+
+        const res = await fetch('/api/sesiones', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            proyectoId: foundProject.id,
+            facturable: facturableBool,
+            duracion: duracionSegundos,
+            fecha: sess.fecha,
+            descripcion: sess.descripcion || ''
+          })
+        });
+
+        if (res.ok) {
+          importedCount++;
+        } else {
+          console.error('Error importing session row:', await res.text());
+        }
+      } catch (err) {
+        console.error('Network error during session import:', err);
+      }
+    }
+
+    // Refresh data
+    await fetchAllData(apiToken);
+    alert(`Se han importado exitosamente ${importedCount} de ${validSessions.length} sesiones de tiempo.`);
+  };
+
+  const handleResetData = () => {
+    setDeleteConfirm({
+      show: true,
+      type: 'reset',
+      id: -1,
+      message: '¿Estás seguro de que deseas continuar? Esto eliminará todos los datos de forma permanente y dejará la app como recién instalada.'
+    });
+  };
+
   const handleEditClient = (cli: Client) => {
     setEditingClient(cli);
     setClientForm({ nombre: cli.nombre, contacto: cli.contacto, tipo: cli.tipo });
@@ -1033,6 +1173,32 @@ export default function App() {
     }
   };
 
+  const executeResetData = async () => {
+    if (!apiToken) return;
+    try {
+      const res = await fetch('/api/demo/reset', {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${apiToken}`, 
+          'Content-Type': 'application/json' 
+        }
+      });
+      if (res.ok) {
+        setClientes([]);
+        setProyectos([]);
+        setServicios([]);
+        setSesiones([]);
+        setFacturas([]);
+        alert('Toda la información ha sido eliminada. La aplicación ha quedado limpia.');
+      } else {
+        alert('Ocurrió un error al intentar reiniciar los datos.');
+      }
+    } catch (err) {
+      console.error('Error resetting data:', err);
+      alert('Error de conexión al reiniciar los datos.');
+    }
+  };
+
 
   // ---------------- FINANCE METRICS / MATH ----------------
 
@@ -1053,11 +1219,27 @@ export default function App() {
 
   // Render ranking of clients by revenue
   const getClientRanking = () => {
-    const clientsData: { [key: number]: { id: number; nombre: string; ingresos: number; segundos: number } } = {};
+    const clientsData: { 
+      [key: number]: { 
+        id: number; 
+        nombre: string; 
+        ingresos: number; 
+        segundos: number;
+        segundosFacturables: number;
+        segundosNoFacturables: number;
+      } 
+    } = {};
     
     // Initialize
     clientes.forEach(c => {
-      clientsData[c.id] = { id: c.id, nombre: c.nombre, ingresos: 0, segundos: 0 };
+      clientsData[c.id] = { 
+        id: c.id, 
+        nombre: c.nombre, 
+        ingresos: 0, 
+        segundos: 0,
+        segundosFacturables: 0,
+        segundosNoFacturables: 0
+      };
     });
 
     // Sum invoices
@@ -1069,8 +1251,21 @@ export default function App() {
 
     // Sum timer seconds
     sesiones.forEach(s => {
-      if (s.proyecto?.clienteId && clientsData[s.proyecto.clienteId]) {
-        clientsData[s.proyecto.clienteId].segundos += s.duracion;
+      let clientID = s.proyecto?.clienteId;
+      if (!clientID && s.proyectoId) {
+        const proj = proyectos.find(p => p.id === s.proyectoId);
+        if (proj) {
+          clientID = proj.clienteId;
+        }
+      }
+      
+      if (clientID && clientsData[clientID]) {
+        clientsData[clientID].segundos += s.duracion;
+        if (s.facturable) {
+          clientsData[clientID].segundosFacturables += s.duracion;
+        } else {
+          clientsData[clientID].segundosNoFacturables += s.duracion;
+        }
       }
     });
 
@@ -1120,7 +1315,15 @@ export default function App() {
               <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mt-1 leading-none">Freelance Management</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleResetData}
+              className="text-[11px] font-bold px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-100 transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Borrar todos los datos y empezar de cero"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Empezar de cero</span>
+            </button>
             <button 
               onClick={() => signOut(auth)}
               className="text-slate-400 hover:text-rose-600 p-1.5 rounded-full hover:bg-slate-50 transition-colors"
@@ -1291,68 +1494,111 @@ export default function App() {
             <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
               
               {/* Left Rank list */}
-              <div className="col-span-12 md:col-span-7 bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
-                <div className="flex justify-between items-center mb-6">
-                  <h3 className="font-extrabold text-slate-900 tracking-tight text-base">Ranking Clientes por Ingresos</h3>
-                  <span className="text-xs text-indigo-600 font-bold uppercase tracking-wider">Reporte Lúcida</span>
-                </div>
+              <div className="col-span-12 md:col-span-7 bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col justify-between">
+                <div>
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="font-extrabold text-slate-900 tracking-tight text-base">Ranking Clientes por Ingresos</h3>
+                    <span className="text-xs text-indigo-600 font-bold uppercase tracking-wider">Reporte Lúcida</span>
+                  </div>
 
-                <div className="space-y-5">
-                  {clientRanking.length === 0 ? (
-                    <p className="text-xs text-slate-400 text-center py-6">No hay clientes suficientes para calcular rankings.</p>
-                  ) : (
-                    (() => {
-                      const maxIngresos = Math.max(...clientRanking.map(r => r.ingresos), 1);
-                      return clientRanking.slice(0, 4).map((rank, idx) => {
-                        const barWidth = `${Math.min(100, Math.max(12, (rank.ingresos / maxIngresos) * 100))}%`;
-                        const formattedRank = (idx + 1).toString().padStart(2, '0');
-                        return (
-                          <div key={rank.id || idx} className="flex items-center justify-between text-sm">
-                            <span className="w-8 text-slate-300 font-extrabold">{formattedRank}</span>
-                            <div className="flex-1 md:flex md:items-center md:justify-between">
-                              <span className="font-semibold text-slate-800 block md:inline max-w-[160px] truncate">{rank.nombre}</span>
-                              <span className="font-mono font-bold text-slate-900 block md:inline md:text-right">{formatCLP(rank.ingresos)}</span>
+                  <div className="space-y-1">
+                    {clientRanking.length === 0 ? (
+                      <p className="text-xs text-slate-400 text-center py-6">No hay clientes suficientes para calcular rankings.</p>
+                    ) : (
+                      (() => {
+                        const maxIngresos = Math.max(...clientRanking.map(r => r.ingresos), 1);
+                        return clientRanking.slice(0, 5).map((rank, idx) => {
+                          const barWidth = `${Math.min(100, Math.max(12, (rank.ingresos / maxIngresos) * 100))}%`;
+                          const formattedRank = (idx + 1).toString().padStart(2, '0');
+                          return (
+                            <div key={rank.id || idx} className="flex items-center justify-between text-sm border-b border-slate-100 py-2.5 last:border-0 min-h-[64px]">
+                              <div className="flex items-center gap-3 flex-1 min-w-0">
+                                <span className="text-slate-300 font-extrabold text-xs">{formattedRank}</span>
+                                <div className="min-w-0 flex-1">
+                                  <span className="font-semibold text-slate-800 block truncate text-sm">{rank.nombre}</span>
+                                  <span className="text-[10px] text-slate-400 font-mono">Ingresos acumulados</span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-4 shrink-0">
+                                <span className="font-mono font-bold text-slate-950 text-right text-sm">{formatCLP(rank.ingresos)}</span>
+                                <div className="hidden sm:block w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                  <div className="h-full bg-slate-900 rounded-full transition-all duration-500" style={{ width: barWidth }}></div>
+                                </div>
+                              </div>
                             </div>
-                            <div className="hidden sm:block w-28 h-2 bg-slate-100 rounded-full ml-6 overflow-hidden shrink-0">
-                              <div className="h-full bg-slate-900 rounded-full transition-all duration-500" style={{ width: barWidth }}></div>
-                            </div>
-                          </div>
-                        );
-                      });
-                    })()
-                  )}
+                          );
+                        });
+                      })()
+                    )}
+                  </div>
                 </div>
               </div>
 
               {/* Right Client time consumption */}
-              <div className="col-span-12 md:col-span-5 bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
-                <h3 className="font-extrabold text-slate-900 tracking-tight text-base mb-6">Horas Consumidas por Cliente</h3>
-                
-                <div className="space-y-4">
-                  {clientRanking.length === 0 ? (
-                    <p className="text-xs text-slate-400 text-center py-6">Registra horas usando nuestro cronómetro.</p>
-                  ) : (
-                    clientRanking.slice(0, 3).map((rank) => {
-                      const originalClient = clientes.find(c => c.id === rank.id);
-                      const hasDrainingRatio = rank.segundos > 30 * 3600 && rank.ingresos < 700000;
-                      return (
-                        <div key={rank.id} className="flex items-center justify-between border-b border-slate-100 pb-3 last:border-0 last:pb-0">
-                          <div>
-                            <p className="text-sm font-semibold text-slate-800 max-w-[140px] truncate">{rank.nombre}</p>
-                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                              Cuota: {originalClient?.tipo || 'Fijo'}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p className="font-mono font-bold text-slate-700 text-sm">{formatHours(rank.segundos)}</p>
-                            <p className={`text-[10px] font-extrabold ${hasDrainingRatio ? 'text-rose-600' : 'text-emerald-600'}`}>
-                              {hasDrainingRatio ? '⚠️ Controlar' : '✓ Rentable'}
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
+              <div className="col-span-12 md:col-span-5 bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col justify-between">
+                <div>
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="font-extrabold text-slate-900 tracking-tight text-base">Horas Consumidas por Cliente</h3>
+                    <span className="text-xs text-indigo-600 font-bold uppercase tracking-wider">Bitácora</span>
+                  </div>
+                  
+                  <div className="space-y-1">
+                    {clientRanking.length === 0 ? (
+                      <p className="text-xs text-slate-400 text-center py-6">Registra horas usando nuestro cronómetro.</p>
+                    ) : (
+                      (() => {
+                        const clientsByHours = [...clientRanking].sort((a, b) => b.segundos - a.segundos);
+                        return clientsByHours.slice(0, 5).map((rank) => {
+                          const originalClient = clientes.find(c => c.id === rank.id);
+                          
+                          const totalHours = rank.segundos / 3600;
+                          const billableHours = (rank.segundosFacturables || 1) / 3600;
+                          const nonBillableHours = (rank.segundosNoFacturables || 0) / 3600;
+                          
+                          const pctBillable = totalHours > 0 ? (billableHours / totalHours) * 100 : 100;
+                          const tarifaEfectiva = totalHours > 0 ? rank.ingresos / totalHours : 0;
+                          
+                          let statusLabel = '✓ Rentable';
+                          let statusClass = 'text-emerald-600';
+                          
+                          if (totalHours > 0) {
+                            if (pctBillable < 60 || nonBillableHours > 12 || (rank.segundos > 10 * 3600 && tarifaEfectiva < 15000)) {
+                              statusLabel = '⚠️ Rentabilidad Baja';
+                              statusClass = 'text-rose-600';
+                            } else if (pctBillable < 85 || nonBillableHours > 5) {
+                              statusLabel = '⚠️ Rentabilidad Media';
+                              statusClass = 'text-amber-600';
+                            }
+                          } else {
+                            statusLabel = '✓ Sin horas';
+                            statusClass = 'text-slate-400';
+                          }
+                          
+                          return (
+                            <div key={rank.id} className="flex items-center justify-between border-b border-slate-100 py-2.5 last:border-0 min-h-[64px]">
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-slate-800 truncate">{rank.nombre}</p>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                                  Cuota: {originalClient?.tipo || 'Fijo'}
+                                </p>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <p className="font-mono font-bold text-slate-700 text-sm">{formatHours(rank.segundos)}</p>
+                                <p className={`text-[10px] font-extrabold ${statusClass}`}>
+                                  {statusLabel}
+                                </p>
+                                {totalHours > 0 && (
+                                  <p className="text-[9px] text-slate-400 font-mono mt-0.5">
+                                    Ef: {formatCLP(tarifaEfectiva)}/h • {Math.round(pctBillable)}% Fac
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -1727,11 +1973,23 @@ export default function App() {
         {/* ---------------- 5. TAB: SESIONES (BITÁCORA) ---------------- */}
         {currentTab === 'sesiones' && (
           <div className="flex flex-col gap-6">
-            <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
-              <h2 className="text-xl font-extrabold text-slate-950 tracking-tight">
-                Bitácora de Tiempos
-              </h2>
-              <p className="text-slate-400 text-xs mt-1">Historial del cronómetro Lúcida. Suma horas facturables y de apoyo.</p>
+            <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+              <div>
+                <h2 className="text-xl font-extrabold text-slate-950 tracking-tight">
+                  Bitácora de Tiempos
+                </h2>
+                <p className="text-slate-400 text-xs mt-1">Historial del cronómetro Lúcida. Suma horas facturables y de apoyo.</p>
+              </div>
+              <div>
+                <button
+                  onClick={() => setShowImportSessionModal(true)}
+                  className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 py-2.5 px-4 rounded-lg flex items-center gap-1.5 text-xs font-bold shadow-xs transition-all cursor-pointer"
+                  title="Importar Sesiones de Tiempo desde Excel"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  <span>Importar desde Excel</span>
+                </button>
+              </div>
             </div>
 
             {/* Overall sum summary stats */}
@@ -1866,8 +2124,17 @@ export default function App() {
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="bg-[#FDFCFB] border border-slate-200 rounded-2xl overflow-hidden w-full max-w-md shadow-xl animate-in fade-in zoom-in-95 duration-200">
             <div className="bg-rose-600 text-white p-5 font-bold tracking-tight text-lg flex items-center gap-2">
-              <Trash2 className="w-5 h-5 flex-shrink-0" />
-              <span>Confirmar Eliminación</span>
+              {deleteConfirm.type === 'reset' ? (
+                <>
+                  <RefreshCw className="w-5 h-5 flex-shrink-0 animate-spin-slow" />
+                  <span>Reiniciar Lúcida</span>
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-5 h-5 flex-shrink-0" />
+                  <span>Confirmar Eliminación</span>
+                </>
+              )}
             </div>
             <div className="p-6 flex flex-col gap-4">
               <p className="text-sm font-semibold text-slate-800">
@@ -1895,6 +2162,11 @@ export default function App() {
                     Este registro de tiempo y las horas contabilizadas se eliminarán permanentemente de la base de datos SQL.
                   </span>
                 )}
+                {deleteConfirm.type === 'reset' && (
+                  <span>
+                    <strong>Impacto Total:</strong> Se eliminarán de forma definitiva todos tus clientes, proyectos, servicios, facturas y sesiones de tiempo de la base de datos para habilitar una demostración limpia. Esta acción es irreversible.
+                  </span>
+                )}
               </div>
 
               <div className="flex gap-2.5 justify-end pt-4 border-t border-slate-100">
@@ -1919,12 +2191,14 @@ export default function App() {
                         await executeDeleteInvoice(id);
                       } else if (type === 'session') {
                         await executeDeleteSession(id);
+                      } else if (type === 'reset') {
+                        await executeResetData();
                       }
                     }
                   }}
                   className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer transition-all duration-200"
                 >
-                  Eliminar permanentemente
+                  {deleteConfirm.type === 'reset' ? 'Empezar de cero' : 'Eliminar permanentemente'}
                 </button>
               </div>
             </div>
@@ -1964,6 +2238,19 @@ export default function App() {
         columnConfig={invoiceColumnConfig}
         onImport={handleImportInvoices}
         sampleColumnsMessage="Tu planilla debe contener columnas correspondientes a: Cliente (debe existir), Proyecto (opcional, debe ser del cliente), Monto (valor numérico), Fecha Emisión (YYYY-MM-DD), Origen de Deuda (opcional, YYYY-MM-DD) y Estado (Pagada, Pendiente o Vencida)."
+      />
+
+      {/* ---------------- TIME SESSIONS IMPORT MODAL ---------------- */}
+      <ExcelImporter
+        isOpen={showImportSessionModal}
+        onClose={() => setShowImportSessionModal(false)}
+        title="Importar Sesiones de Tiempo desde Excel"
+        subtitle="Sube tu planilla de sesiones de tiempo (.xlsx o .csv) para cargarlas de una vez en Lúcida"
+        columnConfig={sessionColumnConfig}
+        onImport={handleImportSessions}
+        importTypeLabelSingular="sesión de tiempo"
+        importTypeLabelPlural="sesiones de tiempo"
+        sampleColumnsMessage="Tu planilla debe contener columnas correspondientes a: Proyecto (que ya debe existir en la base de datos), Duración en horas (por ejemplo: 2 o 1.5), Facturable (Sí/No, Facturable/No facturable o true/false), Fecha (YYYY-MM-DD) y Descripción opcional."
       />
 
 

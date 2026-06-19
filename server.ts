@@ -455,6 +455,8 @@ async function startServer() {
       await db.delete(proyectos).where(eq(proyectos.userId, userId));
       // 4. Delete associated clients
       await db.delete(clientes).where(eq(clientes.userId, userId));
+      // 5. Delete associated services
+      await db.delete(servicios).where(eq(servicios.userId, userId));
 
       res.json({ message: 'Todos los datos previos fueron eliminados con éxito.' });
     } catch (error: any) {

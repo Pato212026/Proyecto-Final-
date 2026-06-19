@@ -22,6 +22,8 @@ interface ExcelImporterProps {
   columnConfig: ColumnMapping[];
   onImport: (validData: any[]) => Promise<void>;
   sampleColumnsMessage: string;
+  importTypeLabelSingular?: string;
+  importTypeLabelPlural?: string;
 }
 
 export function ExcelImporter({
@@ -31,7 +33,9 @@ export function ExcelImporter({
   subtitle,
   columnConfig,
   onImport,
-  sampleColumnsMessage
+  sampleColumnsMessage,
+  importTypeLabelSingular = 'registro',
+  importTypeLabelPlural = 'registros'
 }: ExcelImporterProps) {
   const [file, setFile] = useState<File | null>(null);
   const [parsedRows, setParsedRows] = useState<any[]>([]);
@@ -497,7 +501,7 @@ export function ExcelImporter({
                   ) : (
                     <>
                       <CheckCircle2 className="w-3.5 h-3.5" />
-                      Confirmar Importación ({validRowsCount} {validRowsCount === 1 ? 'cliente' : 'clientes'})
+                      Confirmar Importación ({validRowsCount} {validRowsCount === 1 ? importTypeLabelSingular : importTypeLabelPlural})
                     </>
                   )}
                 </button>
