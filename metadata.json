@@ -1,0 +1,6 @@
+{
+  "name": "Lúcida",
+  "description": "Sistema de gestión y dashboard financiero para diseñadoras freelance chilenas. Incluye control de clientes, proyectos, bitácora de horas con cronómetro, tarifas efectivas y control de facturas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
