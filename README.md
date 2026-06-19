@@ -20,14 +20,14 @@ Además incluye un cronómetro asociado a cliente/servicio/proyecto con marca fa
 facturable, y un sistema de importación masiva desde Excel (clientes, proyectos, facturas y
 sesiones de tiempo) que permite a Lucía migrar la información que hoy tiene dispersa en planillas.
 ---
-Aplicación en línea
+Aplicación en línea:
 La aplicación está desplegada y disponible públicamente en Render:
 https://proyecto-final-82mk.onrender.com/
 > Nota: el servicio corre en el plan gratuito de Render, por lo que tras un período de inactividad
 > la aplicación entra en reposo. La primera carga puede tardar hasta ~50 segundos mientras el
 > servicio se reactiva; las siguientes son inmediatas.
 ---
-Stack tecnológico
+Stack tecnológico:
 Capa	Tecnología
 Frontend	React 19 + TypeScript, Vite, Tailwind CSS
 Backend	Node.js + Express (TypeScript)
@@ -71,7 +71,6 @@ despliegue en Render.
 La estrategia de Prompt Engineering y el proceso iterativo de corrección de errores están
 documentados en `/docs/Prompts IA.pdf`.
 ---
-Aplicación en vivo (Render): https://proyecto-final-82mk.onrender.com/
 Prototipo (Stitch): https://stitch.withgoogle.com/projects/12412484818455014671
 Video pitch (demostración): [pegar aquí el enlace de YouTube o Drive una vez grabado]
 ---
