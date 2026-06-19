@@ -74,10 +74,9 @@ documentados en `/docs/Prompts IA.pdf`.
 Prototipo (Stitch): https://stitch.withgoogle.com/projects/12412484818455014671
 Video pitch (demostración): [pegar aquí el enlace de YouTube o Drive una vez grabado]
 ---
-Grupo 4 — Caso "Freelance en Apuros"
+Autores:
 Patricio Alarcón Salas/
 Francisco Esquivel Rojas/
 Allén Saray Noemí Flores Ortiz/
 Camila Ignacia Soto Ceriche.
-Asignatura: Sistemas de Información — Ingeniería Comercial
 
