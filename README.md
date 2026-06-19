@@ -1,16 +1,16 @@
-Lúcida — Sistema de Gestión para Diseñadoras Freelance
+Lúcida — Sistema de Gestión para Diseñadoras Freelance.
 Proyecto desarrollado para la asignatura Sistemas de Información (Ingeniería Comercial).
 Caso asignado: "Freelance en Apuros — La vida desordenada de Lucía".
 > El nombre **Lúcida** es un guiño a la protagonista del caso, Lucía: la herramienta busca darle
 > claridad ("lucidez") financiera y operativa a su trabajo como diseñadora independiente.
 ---
-El problema
+El problema:
 Lucía es diseñadora gráfica freelance con seis clientes fijos y varios esporádicos. Cobra de tres
 formas distintas (por hora, por proyecto y por suscripción mensual), factura desde Word, anota sus
 horas en las notas del celular y lleva los pagos en un Excel desactualizado. Como consecuencia, no
 pudo demostrar que un cliente le debía dinero desde enero. El problema de fondo no es de orden
 personal, sino una falla en la arquitectura de información de su negocio.
-La solución
+La solución:
 Lúcida es una aplicación web que centraliza clientes, proyectos, horas trabajadas y pagos, y
 ofrece un dashboard financiero que responde las tres preguntas clave del caso:
 ¿Cuánto he facturado este mes y cuánto me deben aún? (con desglose pagado / pendiente / vencido).
@@ -59,14 +59,15 @@ la base de datos PostgreSQL, el backend y el frontend a partir de los diseños d
 La estrategia de Prompt Engineering y el proceso iterativo de corrección de errores están
 documentados en `/docs/Prompts IA.pdf`.
 ---
-Enlaces
 Prototipo (Stitch): https://stitch.withgoogle.com/projects/12412484818455014671
 Video pitch (demostración): [pegar aquí el enlace de YouTube o Drive una vez grabado]
 ---
-Autoría
-Grupo 4 — Caso "Freelance en Apuros"
-Patricio Alarcón Salas
-Francisco Esquivel Rojas
-Allén Saray Noemí Flores Ortiz
-Camila Ignacia Soto Ceriche
+Grupo 4 — Caso "Freelance en Apuros":
+Patricio Alarcón Salas/
+Francisco Esquivel Rojas/
+Allén Saray Noemí Flores Ortiz/
+Camila Ignacia Soto Ceriche.
 Asignatura: Sistemas de Información — Ingeniería Comercial
+
+
+
