@@ -1,4 +1,4 @@
-Lúcida — Sistema de Gestión para Diseñadoras Freelance
+Lúcida — Sistema de Gestión para Diseñadores Freelance
 Proyecto desarrollado para la asignatura Sistemas de Información (Ingeniería Comercial).
 Caso asignado: "Freelance en Apuros — La vida desordenada de Lucía".
 > El nombre **Lúcida** es un guiño a la protagonista del caso, Lucía: la herramienta busca darle
